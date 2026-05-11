@@ -21,8 +21,13 @@ SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 't_p71111086_zenith_development_1')
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password',
 }
+
+def check_admin(event: dict) -> bool:
+    headers = event.get('headers') or {}
+    provided = headers.get('X-Admin-Password') or headers.get('x-admin-password', '')
+    return provided == os.environ.get('ADMIN_PASSWORD', '')
 
 def handler(event: dict, context) -> dict:
     """Управление треками: загрузка файлов в S3, сохранение в БД, получение списка."""
@@ -32,7 +37,19 @@ def handler(event: dict, context) -> dict:
 
     method = event.get('httpMethod', 'GET')
 
-    # GET /tracks — получить все треки
+    # POST /verify-password — проверить пароль
+    path = event.get('path', '/')
+    if method == 'POST' and path.endswith('/verify-password'):
+        body = json.loads(event.get('body') or '{}')
+        password = body.get('password', '')
+        correct = password == os.environ.get('ADMIN_PASSWORD', '')
+        return {
+            'statusCode': 200,
+            'headers': CORS_HEADERS,
+            'body': json.dumps({'ok': correct})
+        }
+
+    # GET — получить все треки (публичный)
     if method == 'GET':
         conn = get_db()
         cur = conn.cursor()
@@ -66,13 +83,16 @@ def handler(event: dict, context) -> dict:
             'body': json.dumps({'tracks': tracks})
         }
 
-    # POST /tracks — загрузить файл и сохранить трек
+    # POST — загрузить файл (только админ)
     if method == 'POST':
+        if not check_admin(event):
+            return {'statusCode': 403, 'headers': CORS_HEADERS, 'body': json.dumps({'error': 'Forbidden'})}
+
         body = json.loads(event.get('body') or '{}')
 
         file_b64 = body.get('file_data', '')
         file_name = body.get('file_name', 'track')
-        file_type = body.get('file_type', 'audio')  # 'audio' or 'video'
+        file_type = body.get('file_type', 'audio')
         title = body.get('title', file_name)
         artist = body.get('artist', '')
         cell_row = int(body.get('cell_row', 0))
@@ -80,7 +100,6 @@ def handler(event: dict, context) -> dict:
         color = body.get('color', 'from-purple-900 to-indigo-900')
         emoji = body.get('emoji', '🎵')
 
-        # Upload to S3
         file_bytes = base64.b64decode(file_b64)
         ext = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else 'mp3'
         key = f"tracks/{uuid.uuid4()}.{ext}"
@@ -94,17 +113,11 @@ def handler(event: dict, context) -> dict:
         content_type = content_type_map.get(ext, 'application/octet-stream')
 
         s3 = get_s3()
-        s3.put_object(
-            Bucket='files',
-            Key=key,
-            Body=file_bytes,
-            ContentType=content_type,
-        )
+        s3.put_object(Bucket='files', Key=key, Body=file_bytes, ContentType=content_type)
 
         access_key = os.environ['AWS_ACCESS_KEY_ID']
         file_url = f"https://cdn.poehali.dev/projects/{access_key}/bucket/{key}"
 
-        # Save to DB (upsert by cell position)
         conn = get_db()
         cur = conn.cursor()
         cur.execute(f"""
@@ -114,7 +127,6 @@ def handler(event: dict, context) -> dict:
             RETURNING id
         """, (cell_row, cell_col, title, artist, file_url, file_type, color, emoji))
 
-        # If cell already has a track — update it
         row = cur.fetchone()
         if not row:
             cur.execute(f"""
@@ -145,8 +157,11 @@ def handler(event: dict, context) -> dict:
             })
         }
 
-    # DELETE /tracks — удалить трек по id
+    # DELETE — удалить трек (только админ)
     if method == 'DELETE':
+        if not check_admin(event):
+            return {'statusCode': 403, 'headers': CORS_HEADERS, 'body': json.dumps({'error': 'Forbidden'})}
+
         params = event.get('queryStringParameters') or {}
         track_id = params.get('id')
         conn = get_db()

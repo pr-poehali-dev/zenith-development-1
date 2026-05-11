@@ -46,7 +46,6 @@ function makeEmpty(row: number, col: number): CellTrack {
   }
 }
 
-// Hidden file input trigger
 function useFileUpload(onFile: (file: File) => void) {
   const inputRef = useRef<HTMLInputElement>(null)
   const trigger = () => inputRef.current?.click()
@@ -86,15 +85,18 @@ interface TrackCardProps {
   cell: CellTrack
   isPlaying: boolean
   uploading: boolean
+  isAdmin: boolean
   onClick: () => void
   onLongPress: () => void
 }
 
-function TrackCard({ cell, isPlaying, uploading, onClick, onLongPress }: TrackCardProps) {
+function TrackCard({ cell, isPlaying, uploading, isAdmin, onClick, onLongPress }: TrackCardProps) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handlePressStart = () => {
-    longPressTimer.current = setTimeout(() => onLongPress(), 600)
+    if (!cell.isEmpty) {
+      longPressTimer.current = setTimeout(() => onLongPress(), 600)
+    }
   }
   const handlePressEnd = () => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current)
@@ -126,17 +128,31 @@ function TrackCard({ cell, isPlaying, uploading, onClick, onLongPress }: TrackCa
         <>
           <div className="absolute inset-0 flex items-center justify-center">
             <span className={`${cell.isEmpty ? "text-4xl opacity-40" : "text-5xl md:text-6xl"}`}>
-              {cell.emoji}
+              {cell.isEmpty && isAdmin ? "+" : cell.emoji}
             </span>
           </div>
 
           <WaveBar playing={isPlaying} />
 
-          {cell.isEmpty && (
+          {/* Admin badge on filled cells */}
+          {isAdmin && !cell.isEmpty && (
+            <div className="absolute top-2 left-2 bg-black/50 rounded-full p-1">
+              <Icon name="Pencil" size={10} className="text-white/70" />
+            </div>
+          )}
+
+          {cell.isEmpty && isAdmin && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="border-2 border-dashed border-white/20 rounded-xl inset-3 absolute flex items-center justify-center">
-                <Icon name="Plus" size={20} className="text-white/30" />
+              <div className="border-2 border-dashed border-white/30 rounded-xl inset-3 absolute flex items-center justify-center">
+                <Icon name="Plus" size={20} className="text-white/40" />
               </div>
+            </div>
+          )}
+
+          {/* Lock icon for non-admin empty cells */}
+          {cell.isEmpty && !isAdmin && (
+            <div className="absolute inset-0 flex items-center justify-center opacity-20">
+              <Icon name="Music" size={28} className="text-white" />
             </div>
           )}
 
@@ -154,8 +170,174 @@ function TrackCard({ cell, isPlaying, uploading, onClick, onLongPress }: TrackCa
   )
 }
 
+// Password modal
+function PasswordModal({ onSuccess, onClose }: { onSuccess: () => void; onClose: () => void }) {
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }, [])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(false)
+    try {
+      const res = await fetch(`${TRACKS_URL}/verify-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        onSuccess()
+      } else {
+        setError(true)
+        setPassword("")
+      }
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <motion.div
+        className="bg-background rounded-2xl p-8 w-full max-w-sm shadow-2xl"
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.9, y: 20 }}
+      >
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+            <Icon name="Lock" size={18} className="text-primary" />
+          </div>
+          <div>
+            <h3 className="font-serif text-lg text-foreground">Режим администратора</h3>
+            <p className="text-muted-foreground text-xs">Введи пароль для управления треками</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <input
+              ref={inputRef}
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(false) }}
+              placeholder="Пароль"
+              className={`w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 transition-all ${error ? "ring-2 ring-destructive" : "focus:ring-primary"}`}
+            />
+            {error && (
+              <motion.p
+                className="text-destructive text-xs mt-2 ml-1"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                Неверный пароль
+              </motion.p>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl bg-secondary text-foreground hover:bg-secondary/80 transition-colors text-sm"
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !password}
+              className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm disabled:opacity-50"
+              data-clickable
+            >
+              {loading ? "..." : "Войти"}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// Cell action modal (admin only)
+function CellActionModal({
+  cell,
+  onReplace,
+  onDelete,
+  onClose,
+}: {
+  cell: CellTrack
+  onReplace: () => void
+  onDelete: () => void
+  onClose: () => void
+}) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-4 pb-8"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <motion.div
+        className="bg-background rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+      >
+        <div className="flex items-center gap-3 mb-6">
+          <span className="text-3xl">{cell.emoji}</span>
+          <div className="min-w-0">
+            <p className="font-medium text-foreground truncate">{cell.title}</p>
+            {cell.artist && <p className="text-muted-foreground text-sm truncate">{cell.artist}</p>}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <button
+            className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground"
+            onClick={onReplace}
+            data-clickable
+          >
+            <Icon name="RefreshCw" size={16} className="text-primary" />
+            <span className="text-sm">Заменить трек</span>
+          </button>
+          <button
+            className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-destructive/10 hover:bg-destructive/20 transition-colors text-destructive"
+            onClick={onDelete}
+            data-clickable
+          >
+            <Icon name="Trash2" size={16} />
+            <span className="text-sm">Удалить трек</span>
+          </button>
+        </div>
+
+        <button
+          className="w-full mt-3 py-3 rounded-xl bg-secondary/50 text-muted-foreground hover:bg-secondary transition-colors text-sm"
+          onClick={onClose}
+        >
+          Отмена
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 export function CarouselSection() {
-  // cells: flat array ROWS*COLS, indexed row*COLS+col
   const [cells, setCells] = useState<CellTrack[]>(() =>
     Array.from({ length: TOTAL }, (_, i) => makeEmpty(Math.floor(i / COLS), i % COLS))
   )
@@ -164,9 +346,12 @@ export function CarouselSection() {
   const [pendingUploadIdx, setPendingUploadIdx] = useState<number | null>(null)
   const [rowOffsets, setRowOffsets] = useState([0, 0, 0])
   const [colOffsets, setColOffsets] = useState([0, 0, 0])
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [adminPassword, setAdminPassword] = useState("")
+  const [cellActionIdx, setCellActionIdx] = useState<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  // Load saved tracks on mount
   useEffect(() => {
     fetch(TRACKS_URL)
       .then((r) => r.json())
@@ -175,17 +360,17 @@ export function CarouselSection() {
         setCells((prev) => {
           const next = [...prev]
           data.tracks.forEach((t: Record<string, string | number>) => {
-            const flatIdx = t.cell_row * COLS + t.cell_col
+            const flatIdx = Number(t.cell_row) * COLS + Number(t.cell_col)
             if (flatIdx >= 0 && flatIdx < TOTAL) {
               next[flatIdx] = {
-                id: t.id,
-                title: t.title,
-                artist: t.artist || "",
-                file_url: t.file_url,
-                file_type: t.file_type || "audio",
-                duration: t.duration || "",
-                color: t.color || COLORS[flatIdx % COLORS.length],
-                emoji: t.emoji || EMOJIS[flatIdx % EMOJIS.length],
+                id: Number(t.id),
+                title: String(t.title),
+                artist: String(t.artist || ""),
+                file_url: String(t.file_url),
+                file_type: (t.file_type === "video" ? "video" : "audio"),
+                duration: String(t.duration || ""),
+                color: String(t.color || COLORS[flatIdx % COLORS.length]),
+                emoji: String(t.emoji || EMOJIS[flatIdx % EMOJIS.length]),
                 isEmpty: false,
               }
             }
@@ -204,20 +389,21 @@ export function CarouselSection() {
 
     const row = Math.floor(idx / COLS)
     const col = idx % COLS
-
     const isVideo = file.type.startsWith("video/")
     const title = file.name.replace(/\.[^.]+$/, "")
     const color = COLORS[idx % COLORS.length]
     const emoji = isVideo ? "🎬" : EMOJIS[idx % EMOJIS.length]
 
-    // Read as base64
     const reader = new FileReader()
     reader.onload = async (e) => {
       const b64 = (e.target?.result as string).split(",")[1]
       try {
         const res = await fetch(TRACKS_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Password": adminPassword,
+          },
           body: JSON.stringify({
             file_data: b64,
             file_name: file.name,
@@ -247,7 +433,6 @@ export function CarouselSection() {
           return next
         })
       } catch {
-        // revert to empty on error
         setCells((prev) => {
           const next = [...prev]
           next[idx] = makeEmpty(row, col)
@@ -262,15 +447,16 @@ export function CarouselSection() {
 
   const handleCellClick = (flatIdx: number) => {
     const cell = cells[flatIdx]
+
     if (cell.isEmpty) {
+      if (!isAdmin) return // гости не могут добавлять
       setPendingUploadIdx(flatIdx)
       triggerUpload()
       return
     }
-    if (!cell.file_url) return
 
+    if (!cell.file_url) return
     if (playingIdx === flatIdx) {
-      // pause
       audioRef.current?.pause()
       setPlayingIdx(null)
     } else {
@@ -281,6 +467,47 @@ export function CarouselSection() {
       audio.onended = () => setPlayingIdx(null)
       setPlayingIdx(flatIdx)
     }
+  }
+
+  const handleLongPress = (flatIdx: number) => {
+    if (!isAdmin) {
+      setShowPasswordModal(true)
+      return
+    }
+    setCellActionIdx(flatIdx)
+  }
+
+  const handleDeleteTrack = async () => {
+    if (cellActionIdx === null) return
+    const cell = cells[cellActionIdx]
+    const idx = cellActionIdx
+    setCellActionIdx(null)
+    if (!cell.id) return
+
+    await fetch(`${TRACKS_URL}?id=${cell.id}`, {
+      method: "DELETE",
+      headers: { "X-Admin-Password": adminPassword },
+    })
+
+    const row = Math.floor(idx / COLS)
+    const col = idx % COLS
+    setCells((prev) => {
+      const next = [...prev]
+      next[idx] = makeEmpty(row, col)
+      return next
+    })
+    if (playingIdx === idx) {
+      audioRef.current?.pause()
+      setPlayingIdx(null)
+    }
+  }
+
+  const handleReplaceTrack = () => {
+    if (cellActionIdx === null) return
+    const idx = cellActionIdx
+    setCellActionIdx(null)
+    setPendingUploadIdx(idx)
+    triggerUpload()
   }
 
   const shiftRow = (rowIdx: number, dir: 1 | -1) => {
@@ -310,24 +537,62 @@ export function CarouselSection() {
     <section className="bg-primary py-24 overflow-hidden">
       {fileInput}
 
+      <AnimatePresence>
+        {showPasswordModal && (
+          <PasswordModal
+            onSuccess={() => {
+              setIsAdmin(true)
+              setShowPasswordModal(false)
+              // store password for API calls — read from input not re-exposed
+              const input = document.querySelector<HTMLInputElement>('input[type="password"]')
+              if (input) setAdminPassword(input.value)
+            }}
+            onClose={() => setShowPasswordModal(false)}
+          />
+        )}
+        {cellActionIdx !== null && (
+          <CellActionModal
+            cell={cells[cellActionIdx]}
+            onReplace={handleReplaceTrack}
+            onDelete={handleDeleteTrack}
+            onClose={() => setCellActionIdx(null)}
+          />
+        )}
+      </AnimatePresence>
+
       <div className="max-w-6xl mx-auto px-6 mb-12">
-        <motion.h2
-          className="text-3xl md:text-4xl font-serif text-primary-foreground mb-2"
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-        >
-          Твоя музыка, под рукой.
-        </motion.h2>
-        <motion.p
-          className="text-primary-foreground/60 text-sm"
-          initial={{ opacity: 0, y: 10 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ delay: 0.1 }}
-        >
-          Нажми на ячейку — выбери файл с телефона. Двигай ряды стрелками.
-        </motion.p>
+        <div className="flex items-start justify-between">
+          <div>
+            <motion.h2
+              className="text-3xl md:text-4xl font-serif text-primary-foreground mb-2"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+            >
+              Твоя музыка, под рукой.
+            </motion.h2>
+            <motion.p
+              className="text-primary-foreground/60 text-sm"
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+            >
+              {isAdmin ? "Режим администратора: нажми на ячейку, чтобы добавить. Зажми, чтобы удалить или заменить." : "Нажми на трек, чтобы включить. Двигай ряды стрелками."}
+            </motion.p>
+          </div>
+
+          {/* Admin toggle */}
+          <motion.button
+            className={`mt-1 flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-colors ${isAdmin ? "bg-white/20 text-white" : "bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/70"}`}
+            onClick={() => isAdmin ? setIsAdmin(false) : setShowPasswordModal(true)}
+            whileTap={{ scale: 0.95 }}
+            data-clickable
+          >
+            <Icon name={isAdmin ? "ShieldCheck" : "Shield"} size={14} />
+            <span>{isAdmin ? "Выйти" : "Админ"}</span>
+          </motion.button>
+        </div>
       </div>
 
       <div className="flex justify-center px-6">
@@ -380,10 +645,9 @@ export function CarouselSection() {
                       cell={cell}
                       isPlaying={playingIdx === flatIdx}
                       uploading={uploadingIdx === flatIdx}
+                      isAdmin={isAdmin}
                       onClick={() => handleCellClick(flatIdx)}
-                      onLongPress={() => {
-                        // future: context menu
-                      }}
+                      onLongPress={() => handleLongPress(flatIdx)}
                     />
                   )
                 })
@@ -451,10 +715,7 @@ export function CarouselSection() {
               </div>
               <button
                 className="text-white/60 hover:text-white transition-colors"
-                onClick={() => {
-                  audioRef.current?.pause()
-                  setPlayingIdx(null)
-                }}
+                onClick={() => { audioRef.current?.pause(); setPlayingIdx(null) }}
                 data-clickable
               >
                 <Icon name="X" size={18} />
