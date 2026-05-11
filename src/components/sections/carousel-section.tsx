@@ -241,8 +241,8 @@ function UploadFormModal({ fileName, onConfirm, onClose }: {
   )
 }
 
-function CellActionModal({ cell, onReplace, onDelete, onClose }: {
-  cell: CellTrack; onReplace: () => void; onDelete: () => void; onClose: () => void
+function CellActionModal({ cell, onEdit, onReplace, onDelete, onClose }: {
+  cell: CellTrack; onEdit: () => void; onReplace: () => void; onDelete: () => void; onClose: () => void
 }) {
   return (
     <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-4 pb-8"
@@ -258,10 +258,15 @@ function CellActionModal({ cell, onReplace, onDelete, onClose }: {
           </div>
         </div>
         <div className="space-y-2">
+          <button onClick={onEdit}
+            className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground" data-clickable>
+            <Icon name="Pencil" size={16} className="text-primary" />
+            <span className="text-sm">Редактировать</span>
+          </button>
           <button onClick={onReplace}
             className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground" data-clickable>
             <Icon name="RefreshCw" size={16} className="text-primary" />
-            <span className="text-sm">Заменить трек</span>
+            <span className="text-sm">Заменить файл</span>
           </button>
           <button onClick={onDelete}
             className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-destructive/10 hover:bg-destructive/20 transition-colors text-destructive" data-clickable>
@@ -273,6 +278,77 @@ function CellActionModal({ cell, onReplace, onDelete, onClose }: {
           className="w-full mt-3 py-3 rounded-xl bg-secondary/50 text-muted-foreground hover:bg-secondary transition-colors text-sm">
           Отмена
         </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+function EditTrackModal({ cell, adminPassword, onSave, onClose }: {
+  cell: CellTrack; adminPassword: string; onSave: (title: string, artist: string, lyrics: string) => void; onClose: () => void
+}) {
+  const [title, setTitle] = useState(cell.title)
+  const [artist, setArtist] = useState(cell.artist)
+  const [lyrics, setLyrics] = useState(cell.lyrics)
+  const [saving, setSaving] = useState(false)
+  const lyricsFileRef = useRef<HTMLInputElement>(null)
+
+  const handleLyricsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setLyrics(ev.target?.result as string || "")
+    reader.readAsText(file); e.target.value = ""
+  }
+
+  const handleSave = async () => {
+    if (!title.trim() || !cell.id) return
+    setSaving(true)
+    try {
+      await fetch(TRACKS_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Admin-Password": adminPassword },
+        body: JSON.stringify({ id: cell.id, title, artist, lyrics }),
+      })
+      onSave(title, artist, lyrics)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-4 pb-6"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <motion.div className="bg-background rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}>
+        <div className="flex items-center gap-3 mb-5">
+          <span className="text-2xl">{cell.emoji}</span>
+          <h3 className="font-serif text-base text-foreground">Редактировать трек</h3>
+        </div>
+        <div className="space-y-3">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Название трека"
+            className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
+          <input value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="Исполнитель"
+            className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-muted-foreground">Текст песни</span>
+              <button type="button" onClick={() => lyricsFileRef.current?.click()}
+                className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors" data-clickable>
+                <Icon name="FileText" size={12} /> Загрузить .txt
+              </button>
+              <input ref={lyricsFileRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleLyricsFile} />
+            </div>
+            <textarea value={lyrics} onChange={(e) => setLyrics(e.target.value)}
+              placeholder="Текст песни..." rows={5}
+              className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
+          </div>
+        </div>
+        <div className="flex gap-3 mt-4">
+          <button onClick={onClose}
+            className="flex-1 py-3 rounded-xl bg-secondary text-foreground hover:bg-secondary/80 transition-colors text-sm">Отмена</button>
+          <button onClick={handleSave} disabled={saving || !title.trim()}
+            className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm disabled:opacity-50" data-clickable>
+            {saving ? "Сохраняю..." : "Сохранить"}
+          </button>
+        </div>
       </motion.div>
     </motion.div>
   )
@@ -322,6 +398,7 @@ export function CarouselSection() {
   const [adminPassword, setAdminPassword] = useState("")
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [cellActionIdx, setCellActionIdx] = useState<number | null>(null)
+  const [editCellIdx, setEditCellIdx] = useState<number | null>(null)
   const [showLyrics, setShowLyrics] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingCellIdx, setPendingCellIdx] = useState<number | null>(null)
@@ -428,6 +505,21 @@ export function CarouselSection() {
     const idx = cellActionIdx; setCellActionIdx(null); triggerFileSelect(idx)
   }
 
+  const handleEditTrack = () => {
+    if (cellActionIdx === null) return
+    setEditCellIdx(cellActionIdx); setCellActionIdx(null)
+  }
+
+  const handleEditSave = (title: string, artist: string, lyrics: string) => {
+    if (editCellIdx === null) return
+    setCells((prev) => {
+      const next = [...prev]
+      next[editCellIdx] = { ...next[editCellIdx], title, artist, lyrics }
+      return next
+    })
+    setEditCellIdx(null)
+  }
+
   const shiftRow = (rowIdx: number, dir: 1 | -1) =>
     setRowOffsets((prev) => { const next = [...prev]; next[rowIdx] = ((next[rowIdx] + dir + TOTAL) % TOTAL); return next })
 
@@ -455,8 +547,12 @@ export function CarouselSection() {
             onClose={() => { setShowUploadForm(false); setPendingFile(null); setPendingCellIdx(null) }} />
         )}
         {cellActionIdx !== null && (
-          <CellActionModal cell={cells[cellActionIdx]} onReplace={handleReplaceTrack}
-            onDelete={handleDeleteTrack} onClose={() => setCellActionIdx(null)} />
+          <CellActionModal cell={cells[cellActionIdx]} onEdit={handleEditTrack}
+            onReplace={handleReplaceTrack} onDelete={handleDeleteTrack} onClose={() => setCellActionIdx(null)} />
+        )}
+        {editCellIdx !== null && (
+          <EditTrackModal cell={cells[editCellIdx]} adminPassword={adminPassword}
+            onSave={handleEditSave} onClose={() => setEditCellIdx(null)} />
         )}
         {showLyrics && playingCell && (
           <LyricsPanel cell={playingCell} onClose={() => setShowLyrics(false)} />
