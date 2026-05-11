@@ -29,7 +29,7 @@ export function ShowcaseSection() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
         >
-          Галерея
+          Атмосфера
         </motion.p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">

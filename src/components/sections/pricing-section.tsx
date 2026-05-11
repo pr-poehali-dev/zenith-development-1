@@ -3,18 +3,18 @@ import { Check } from "lucide-react"
 
 const plans = [
   {
-    name: "Старт",
-    price: "1 200",
-    period: " руб/мес",
-    description: "Для личного портфолио",
-    features: ["5 страниц", "Свой домен", "Базовая аналитика", "Поддержка по email"],
+    name: "Личный",
+    price: "Free",
+    period: "",
+    description: "Только для тебя",
+    features: ["До 100 треков", "Аудио и видео", "Кубик-карусель", "Приватный доступ"],
   },
   {
-    name: "Про",
-    price: "2 900",
-    period: " руб/мес",
-    description: "Для растущих авторов",
-    features: ["Безлимит страниц", "Приоритет поддержки", "Расширенная аналитика", "Свой брендинг", "Работа в команде"],
+    name: "Компания",
+    price: "Friends",
+    period: " only",
+    description: "Для своих",
+    features: ["Безлимит файлов", "Общие плейлисты", "Пригласи друзей", "Совместный доступ", "Уведомления о новинках"],
     popular: true,
   },
 ]
@@ -29,8 +29,8 @@ export function PricingSection() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
         >
-          <h2 className="text-3xl md:text-5xl font-serif text-foreground">Простые и понятные цены</h2>
-          <p className="text-muted-foreground mt-4 max-w-md mx-auto">Начните бесплатно, платите когда готовы.</p>
+          <h2 className="text-3xl md:text-5xl font-serif text-foreground">Доступ для своих</h2>
+          <p className="text-muted-foreground mt-4 max-w-md mx-auto">Личная фонотека — только для тебя и друзей.</p>
         </motion.div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto">

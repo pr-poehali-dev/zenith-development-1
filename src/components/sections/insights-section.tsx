@@ -5,23 +5,23 @@ import { ArrowRight } from "lucide-react"
 
 const articles = [
   {
-    title: "Искусство визуального сторителлинга",
-    category: "Дизайн",
+    title: "Лучшие альбомы этого лета",
+    category: "Подборка",
     image: "/visual-storytelling-design-article.jpg",
   },
   {
-    title: "Как создать личный бренд онлайн",
-    category: "Стратегия",
+    title: "Плейлисты для ночных поездок",
+    category: "Настроение",
     image: "/personal-branding-digital-marketing.jpg",
   },
   {
-    title: "Тренды типографики 2025",
-    category: "Типографика",
+    title: "Новинки: что слушают друзья",
+    category: "Рекомендации",
     image: "/typography-trends-modern-fonts.jpg",
   },
   {
-    title: "Минимализм в дизайне портфолио",
-    category: "Вдохновение",
+    title: "Концерты и клипы — любимое видео",
+    category: "Видео",
     image: "/placeholder.svg?height=200&width=300",
   },
 ]
@@ -43,7 +43,7 @@ export function InsightsSection() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
         >
-          Статьи
+          Плейлисты и подборки
         </motion.p>
 
         <div className="divide-y divide-border">
