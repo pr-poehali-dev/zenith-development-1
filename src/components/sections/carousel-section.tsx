@@ -403,9 +403,22 @@ export function CarouselSection() {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingCellIdx, setPendingCellIdx] = useState<number | null>(null)
   const [showUploadForm, setShowUploadForm] = useState(false)
+  const [showSwipeHint, setShowSwipeHint] = useState(() => !localStorage.getItem("swipeHintSeen"))
+  const [spinningRow, setSpinningRow] = useState<number | null>(null)
+  const [spinningCol, setSpinningCol] = useState<number | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (showSwipeHint) {
+      const t = setTimeout(() => {
+        setShowSwipeHint(false)
+        localStorage.setItem("swipeHintSeen", "1")
+      }, 3500)
+      return () => clearTimeout(t)
+    }
+  }, [showSwipeHint])
 
   useEffect(() => {
     fetch(TRACKS_URL).then((r) => r.json()).then((data) => {
@@ -526,29 +539,107 @@ export function CarouselSection() {
   const shiftCol = (colIdx: number, dir: 1 | -1) =>
     setColOffsets((prev) => { const next = [...prev]; next[colIdx] = ((next[colIdx] + dir + TOTAL) % TOTAL); return next })
 
-  const rowSwipeStart = useRef<{ x: number; y: number } | null>(null)
-  const colSwipeStart = useRef<{ x: number; y: number } | null>(null)
+  const rowSwipeStart = useRef<{ x: number; y: number; t: number } | null>(null)
+  const colSwipeStart = useRef<{ x: number; y: number; t: number } | null>(null)
+
+  // Скрыть подсказку при первом свайпе
+  const dismissHint = () => {
+    setShowSwipeHint(false)
+    localStorage.setItem("swipeHintSeen", "1")
+  }
+
+  // Анимированная прокрутка нескольких шагов
+  const animateShiftRow = (rowIdx: number, dir: 1 | -1, steps: number) => {
+    let i = 0
+    const tick = () => {
+      if (i >= steps) { setSpinningRow(null); return }
+      shiftRow(rowIdx, dir); i++
+      setTimeout(tick, i < steps - 1 ? 60 : 120)
+    }
+    setSpinningRow(rowIdx); tick()
+  }
+
+  const animateShiftCol = (colIdx: number, dir: 1 | -1, steps: number) => {
+    let i = 0
+    const tick = () => {
+      if (i >= steps) { setSpinningCol(null); return }
+      shiftCol(colIdx, dir); i++
+      setTimeout(tick, i < steps - 1 ? 60 : 120)
+    }
+    setSpinningCol(colIdx); tick()
+  }
+
+  // Случайный трек: прокрутить случайное число шагов, затем воспроизвести
+  const spinToRandom = (rowIdx: number, dir: 1 | -1) => {
+    const totalSteps = 5 + Math.floor(Math.random() * 7)
+    let i = 0
+    const tick = () => {
+      if (i >= totalSteps) {
+        setSpinningRow(null)
+        // Найти непустой трек в этом ряду и воспроизвести
+        const rowCells = Array.from({ length: COLS }, (_, col) => {
+          const flatIdx = ((rowIdx * COLS + col + rowOffsets[rowIdx] + colOffsets[col]) % TOTAL + TOTAL) % TOTAL
+          return { cell: cells[flatIdx], flatIdx }
+        }).filter(({ cell }) => !cell.isEmpty && cell.file_url)
+        if (rowCells.length === 0) return
+        const pick = rowCells[Math.floor(Math.random() * rowCells.length)]
+        if (audioRef.current) audioRef.current.pause()
+        const audio = new Audio(pick.cell.file_url!)
+        audioRef.current = audio; audio.play().catch(() => {}); audio.onended = () => setPlayingIdx(null)
+        setPlayingIdx(pick.flatIdx)
+        return
+      }
+      shiftRow(rowIdx, dir); i++
+      setTimeout(tick, 40 + i * 8)
+    }
+    setSpinningRow(rowIdx); tick()
+  }
 
   const handleRowSwipeStart = (e: React.TouchEvent) => {
-    rowSwipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    rowSwipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
   }
   const handleRowSwipeEnd = (rowIdx: number, e: React.TouchEvent) => {
     if (!rowSwipeStart.current) return
+    dismissHint()
     const dx = e.changedTouches[0].clientX - rowSwipeStart.current.x
     const dy = Math.abs(e.changedTouches[0].clientY - rowSwipeStart.current.y)
-    if (Math.abs(dx) > 40 && Math.abs(dx) > dy) shiftRow(rowIdx, dx < 0 ? 1 : -1)
+    const dt = Date.now() - rowSwipeStart.current.t
+    const speed = Math.abs(dx) / Math.max(dt, 1) // px/ms
     rowSwipeStart.current = null
+    if (Math.abs(dx) < 30 || Math.abs(dx) < dy) return
+    const dir = dx < 0 ? 1 : -1
+    if (speed > 1.2 || Math.abs(dx) > 220) {
+      // Сильный свайп — случайный выбор
+      spinToRandom(rowIdx, dir)
+    } else {
+      // Средний/слабый — пропорционально расстоянию
+      const steps = Math.max(1, Math.min(5, Math.round(Math.abs(dx) / 55)))
+      if (steps === 1) shiftRow(rowIdx, dir)
+      else animateShiftRow(rowIdx, dir, steps)
+    }
   }
 
   const handleColSwipeStart = (e: React.TouchEvent) => {
-    colSwipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    colSwipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
   }
   const handleColSwipeEnd = (colIdx: number, e: React.TouchEvent) => {
     if (!colSwipeStart.current) return
+    dismissHint()
     const dy = e.changedTouches[0].clientY - colSwipeStart.current.y
     const dx = Math.abs(e.changedTouches[0].clientX - colSwipeStart.current.x)
-    if (Math.abs(dy) > 40 && Math.abs(dy) > dx) shiftCol(colIdx, dy < 0 ? -1 : 1)
+    const dt = Date.now() - colSwipeStart.current.t
+    const speed = Math.abs(dy) / Math.max(dt, 1)
     colSwipeStart.current = null
+    if (Math.abs(dy) < 30 || Math.abs(dy) < dx) return
+    const dir: 1 | -1 = dy < 0 ? -1 : 1
+    if (speed > 1.2 || Math.abs(dy) > 220) {
+      const totalSteps = 5 + Math.floor(Math.random() * 7)
+      animateShiftCol(colIdx, dir, totalSteps)
+    } else {
+      const steps = Math.max(1, Math.min(5, Math.round(Math.abs(dy) / 55)))
+      if (steps === 1) shiftCol(colIdx, dir)
+      else animateShiftCol(colIdx, dir, steps)
+    }
   }
 
   const getCell = (row: number, col: number) => {
@@ -632,12 +723,46 @@ export function CarouselSection() {
               ))}
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 relative">
+              {/* Swipe hint overlay — показывается только первый раз */}
+              <AnimatePresence>
+                {showSwipeHint && (
+                  <motion.div
+                    className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none rounded-2xl overflow-hidden"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    transition={{ duration: 0.4 }}>
+                    <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-5 py-3 flex flex-col items-center gap-2">
+                      <div className="flex items-center gap-2 text-white text-sm font-medium">
+                        <motion.div animate={{ x: [-6, 6, -6] }} transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}>
+                          <Icon name="ArrowLeftRight" size={18} className="text-white" />
+                        </motion.div>
+                        <span>Свайп — листать</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-white/70 text-xs">
+                        <Icon name="Zap" size={13} className="text-yellow-400" />
+                        <span>Резкий свайп — случайный трек</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {Array.from({ length: ROWS }).map((_, row) => (
-                <div key={row} className="flex gap-3"
+                <div key={row} className="flex gap-3 relative"
                   onTouchStart={handleRowSwipeStart}
                   onTouchEnd={(e) => handleRowSwipeEnd(row, e)}
                   style={{ touchAction: "pan-y" }}>
+                  {/* Индикатор вращения */}
+                  <AnimatePresence>
+                    {spinningRow === row && (
+                      <motion.div className="absolute inset-0 z-10 rounded-2xl bg-white/10 backdrop-blur-[2px] flex items-center justify-center pointer-events-none"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                        <motion.div animate={{ rotate: 360 }} transition={{ duration: 0.5, repeat: Infinity, ease: "linear" }}>
+                          <Icon name="Shuffle" size={22} className="text-white/80" />
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   {Array.from({ length: COLS }).map((_, col) => {
                     const { cell, flatIdx } = getCell(row, col)
                     return (
