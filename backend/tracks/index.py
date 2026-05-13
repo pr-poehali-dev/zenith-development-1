@@ -29,8 +29,15 @@ def check_admin(event: dict) -> bool:
     provided = headers.get('X-Admin-Password') or headers.get('x-admin-password', '')
     return provided == os.environ.get('ADMIN_PASSWORD', '')
 
+def upload_file(s3, b64_data: str, prefix: str, ext: str, content_type: str) -> str:
+    data = base64.b64decode(b64_data)
+    key = f"{prefix}/{uuid.uuid4()}.{ext}"
+    s3.put_object(Bucket='files', Key=key, Body=data, ContentType=content_type)
+    access_key = os.environ['AWS_ACCESS_KEY_ID']
+    return f"https://cdn.poehali.dev/projects/{access_key}/bucket/{key}"
+
 def handler(event: dict, context) -> dict:
-    """Управление треками: загрузка файлов в S3, текст песни, сохранение в БД."""
+    """Управление треками: загрузка аудио, обложки, текста песни в S3, сохранение в БД."""
 
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
@@ -49,7 +56,7 @@ def handler(event: dict, context) -> dict:
         conn = get_db()
         cur = conn.cursor()
         cur.execute(f"""
-            SELECT id, cell_row, cell_col, title, artist, file_url, file_type, duration, color, emoji, lyrics
+            SELECT id, cell_row, cell_col, title, artist, file_url, file_type, duration, color, emoji, lyrics, cover_url
             FROM {SCHEMA}.tracks
             ORDER BY created_at DESC
         """)
@@ -61,7 +68,7 @@ def handler(event: dict, context) -> dict:
                 'id': r[0], 'cell_row': r[1], 'cell_col': r[2],
                 'title': r[3], 'artist': r[4], 'file_url': r[5],
                 'file_type': r[6], 'duration': r[7], 'color': r[8],
-                'emoji': r[9], 'lyrics': r[10] or '',
+                'emoji': r[9], 'lyrics': r[10] or '', 'cover_url': r[11] or '',
             }
             for r in rows
         ]
@@ -74,48 +81,53 @@ def handler(event: dict, context) -> dict:
 
         body = json.loads(event.get('body') or '{}')
 
-        file_b64  = body.get('file_data', '')
-        file_name = body.get('file_name', 'track')
-        file_type = body.get('file_type', 'audio')
-        title     = body.get('title', file_name)
-        artist    = body.get('artist', '')
-        lyrics    = body.get('lyrics', '')
-        cell_row  = int(body.get('cell_row', 0))
-        cell_col  = int(body.get('cell_col', 0))
-        color     = body.get('color', 'from-purple-900 to-indigo-900')
-        emoji     = body.get('emoji', '🎵')
+        file_b64    = body.get('file_data', '')
+        file_name   = body.get('file_name', 'track')
+        file_type   = body.get('file_type', 'audio')
+        title       = body.get('title', file_name)
+        artist      = body.get('artist', '')
+        lyrics      = body.get('lyrics', '')
+        cell_row    = int(body.get('cell_row', 0))
+        cell_col    = int(body.get('cell_col', 0))
+        color       = body.get('color', 'from-purple-900 to-indigo-900')
+        emoji       = body.get('emoji', '🎵')
+        cover_b64   = body.get('cover_data', '')
+        cover_name  = body.get('cover_name', '')
 
-        file_bytes = base64.b64decode(file_b64)
+        s3 = get_s3()
+
+        # Upload audio/video
         ext = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else 'mp3'
-        key = f"tracks/{uuid.uuid4()}.{ext}"
-        content_type_map = {
+        audio_content_type_map = {
             'mp3': 'audio/mpeg', 'mp4': 'video/mp4', 'wav': 'audio/wav',
             'ogg': 'audio/ogg', 'm4a': 'audio/m4a', 'webm': 'video/webm', 'mov': 'video/quicktime',
         }
-        s3 = get_s3()
-        s3.put_object(Bucket='files', Key=key, Body=file_bytes,
-                      ContentType=content_type_map.get(ext, 'application/octet-stream'))
+        file_url = upload_file(s3, file_b64, 'tracks', ext, audio_content_type_map.get(ext, 'application/octet-stream'))
 
-        access_key = os.environ['AWS_ACCESS_KEY_ID']
-        file_url = f"https://cdn.poehali.dev/projects/{access_key}/bucket/{key}"
+        # Upload cover image (optional)
+        cover_url = ''
+        if cover_b64:
+            cover_ext = cover_name.rsplit('.', 1)[-1].lower() if '.' in cover_name else 'jpg'
+            img_content_type_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
+            cover_url = upload_file(s3, cover_b64, 'covers', cover_ext, img_content_type_map.get(cover_ext, 'image/jpeg'))
 
         conn = get_db()
         cur = conn.cursor()
         cur.execute(f"""
-            INSERT INTO {SCHEMA}.tracks (cell_row, cell_col, title, artist, file_url, file_type, color, emoji, lyrics)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO {SCHEMA}.tracks (cell_row, cell_col, title, artist, file_url, file_type, color, emoji, lyrics, cover_url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING
             RETURNING id
-        """, (cell_row, cell_col, title, artist, file_url, file_type, color, emoji, lyrics))
+        """, (cell_row, cell_col, title, artist, file_url, file_type, color, emoji, lyrics, cover_url))
 
         row = cur.fetchone()
         if not row:
             cur.execute(f"""
                 UPDATE {SCHEMA}.tracks
-                SET title=%s, artist=%s, file_url=%s, file_type=%s, color=%s, emoji=%s, lyrics=%s, created_at=NOW()
+                SET title=%s, artist=%s, file_url=%s, file_type=%s, color=%s, emoji=%s, lyrics=%s, cover_url=%s, created_at=NOW()
                 WHERE cell_row=%s AND cell_col=%s
                 RETURNING id
-            """, (title, artist, file_url, file_type, color, emoji, lyrics, cell_row, cell_col))
+            """, (title, artist, file_url, file_type, color, emoji, lyrics, cover_url, cell_row, cell_col))
             row = cur.fetchone()
 
         track_id = row[0] if row else None
@@ -126,7 +138,7 @@ def handler(event: dict, context) -> dict:
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({
             'id': track_id, 'file_url': file_url, 'title': title,
             'artist': artist, 'cell_row': cell_row, 'cell_col': cell_col,
-            'color': color, 'emoji': emoji, 'lyrics': lyrics,
+            'color': color, 'emoji': emoji, 'lyrics': lyrics, 'cover_url': cover_url,
         })}
 
     # PUT — обновить метаданные (только админ)
@@ -135,20 +147,29 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 403, 'headers': CORS_HEADERS, 'body': json.dumps({'error': 'Forbidden'})}
 
         body = json.loads(event.get('body') or '{}')
-        track_id = body.get('id')
-        title    = body.get('title', '')
-        artist   = body.get('artist', '')
-        lyrics   = body.get('lyrics', '')
+        track_id   = body.get('id')
+        title      = body.get('title', '')
+        artist     = body.get('artist', '')
+        lyrics     = body.get('lyrics', '')
+        cover_b64  = body.get('cover_data', '')
+        cover_name = body.get('cover_name', '')
+
+        cover_url = body.get('cover_url', '')
+        if cover_b64:
+            s3 = get_s3()
+            cover_ext = cover_name.rsplit('.', 1)[-1].lower() if '.' in cover_name else 'jpg'
+            img_content_type_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
+            cover_url = upload_file(s3, cover_b64, 'covers', cover_ext, img_content_type_map.get(cover_ext, 'image/jpeg'))
 
         conn = get_db()
         cur = conn.cursor()
         cur.execute(f"""
-            UPDATE {SCHEMA}.tracks SET title=%s, artist=%s, lyrics=%s WHERE id=%s
-        """, (title, artist, lyrics, track_id))
+            UPDATE {SCHEMA}.tracks SET title=%s, artist=%s, lyrics=%s, cover_url=%s WHERE id=%s
+        """, (title, artist, lyrics, cover_url, track_id))
         conn.commit()
         cur.close()
         conn.close()
-        return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({'ok': True})}
+        return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({'ok': True, 'cover_url': cover_url})}
 
     # DELETE — удалить трек (только админ)
     if method == 'DELETE':
