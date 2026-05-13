@@ -1,406 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Icon from "@/components/ui/icon"
+import { TRACKS_URL, COLS, ROWS, TOTAL, COLORS, EMOJIS, CellTrack, makeEmpty } from "./carousel-types"
+import { PasswordModal, UploadFormModal, EditTrackModal, CellActionModal } from "./carousel-modals"
+import { CarouselGrid } from "./carousel-grid"
+import { NowPlayingPanel } from "./carousel-player"
 
-const TRACKS_URL = "https://functions.poehali.dev/36cc0561-b248-4cd8-b195-d1d5ef5c5a83"
-const COLS = 3
-const ROWS = 3
-const TOTAL = ROWS * COLS
-
-const COLORS = [
-  "from-purple-900 to-indigo-900", "from-red-900 to-pink-900",
-  "from-violet-900 to-fuchsia-900", "from-amber-900 to-orange-900",
-  "from-green-900 to-teal-900", "from-rose-900 to-red-900",
-  "from-blue-900 to-cyan-900", "from-yellow-900 to-amber-900",
-  "from-pink-900 to-rose-900",
-]
-const EMOJIS = ["🎵", "🎶", "🎸", "🎹", "🎺", "🎻", "🥁", "🎤", "🎧"]
-
-interface CellTrack {
-  id?: number
-  title: string; artist: string; file_url?: string
-  file_type: "audio" | "video"; duration: string
-  color: string; emoji: string; lyrics: string
-  cover_url: string; isEmpty?: boolean
-}
-
-function makeEmpty(row: number, col: number): CellTrack {
-  const idx = row * COLS + col
-  return { title: "Добавить трек", artist: "", file_type: "audio", duration: "", color: COLORS[idx % COLORS.length], emoji: "+", lyrics: "", cover_url: "", isEmpty: true }
-}
-
-// ─── Wave bars ───────────────────────────────────────────────────────────────
-function WaveBar({ playing }: { playing: boolean }) {
-  if (!playing) return null
-  return (
-    <div className="absolute top-2 right-2 flex items-end gap-[2px]">
-      {[1,2,3].map(b => (
-        <motion.div key={b} className="w-[3px] bg-white rounded-full"
-          animate={{ height: ["4px","12px","4px"] }}
-          transition={{ duration: 0.5, repeat: Infinity, delay: b*0.13, ease: "easeInOut" }} />
-      ))}
-    </div>
-  )
-}
-
-// ─── Track card ───────────────────────────────────────────────────────────────
-function TrackCard({ cell, isPlaying, uploading, isAdmin, isHighlighted, onClick, onLongPress }: {
-  cell: CellTrack; isPlaying: boolean; uploading: boolean; isAdmin: boolean
-  isHighlighted: boolean; onClick: () => void; onLongPress: () => void
-}) {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const onStart = () => { if (!cell.isEmpty) timer.current = setTimeout(onLongPress, 600) }
-  const onEnd = () => { if (timer.current) clearTimeout(timer.current) }
-
-  return (
-    <motion.div
-      className={`relative bg-gradient-to-br ${cell.color} rounded-2xl overflow-hidden cursor-pointer select-none w-full h-full`}
-      whileHover={{ scale: cell.isEmpty ? 1.02 : 1.05 }} whileTap={{ scale: 0.95 }}
-      animate={isHighlighted
-        ? { boxShadow: ["0 0 0px rgba(255,220,50,0)", "0 0 36px rgba(255,220,50,0.9)", "0 0 0px rgba(255,220,50,0)"] }
-        : isPlaying
-          ? { boxShadow: ["0 0 0px rgba(255,255,255,0)", "0 0 28px rgba(255,255,255,0.45)", "0 0 0px rgba(255,255,255,0)"] }
-          : {}}
-      transition={(isHighlighted || isPlaying) ? { duration: isHighlighted ? 0.8 : 1.4, repeat: isHighlighted ? 3 : Infinity } : { duration: 0.2 }}
-      onClick={onClick} onMouseDown={onStart} onMouseUp={onEnd}
-      onTouchStart={onStart} onTouchEnd={onEnd} data-clickable>
-      {uploading ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-          <motion.div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full"
-            animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }} />
-        </div>
-      ) : (
-        <>
-          {cell.cover_url ? (
-            <img src={cell.cover_url} alt={cell.title} className="absolute inset-0 w-full h-full object-cover" />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className={cell.isEmpty ? "text-4xl opacity-40" : "text-5xl md:text-6xl"}>
-                {cell.isEmpty && isAdmin ? "+" : cell.emoji}
-              </span>
-            </div>
-          )}
-          <WaveBar playing={isPlaying} />
-          {isAdmin && !cell.isEmpty && (
-            <div className="absolute top-2 left-2 bg-black/50 rounded-full p-1">
-              <Icon name="Pencil" size={10} className="text-white/70" />
-            </div>
-          )}
-          {cell.isEmpty && isAdmin && (
-            <div className="absolute inset-3 border-2 border-dashed border-white/30 rounded-xl flex items-center justify-center">
-              <Icon name="Plus" size={20} className="text-white/40" />
-            </div>
-          )}
-          {cell.isEmpty && !isAdmin && (
-            <div className="absolute inset-0 flex items-center justify-center opacity-20">
-              <Icon name="Music" size={28} className="text-white" />
-            </div>
-          )}
-          <motion.div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2"
-            initial={{ opacity: 0 }} whileHover={{ opacity: 1 }}>
-            <p className="text-white font-medium text-[11px] truncate">{cell.title}</p>
-            {cell.artist && <p className="text-white/60 text-[9px] truncate">{cell.artist}</p>}
-          </motion.div>
-        </>
-      )}
-    </motion.div>
-  )
-}
-
-// ─── Password modal ───────────────────────────────────────────────────────────
-function PasswordModal({ onSuccess, onClose }: { onSuccess: (p: string) => void; onClose: () => void }) {
-  const [password, setPassword] = useState(""); const [error, setError] = useState(false); const [loading, setLoading] = useState(false)
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => { setTimeout(() => ref.current?.focus(), 100) }, [])
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true); setError(false)
-    try {
-      const r = await fetch(`${TRACKS_URL}/verify-password`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) })
-      const d = await r.json()
-      if (d.ok) onSuccess(password); else { setError(true); setPassword("") }
-    } catch { setError(true) } finally { setLoading(false) }
-  }
-  return (
-    <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <motion.div className="bg-background rounded-2xl p-8 w-full max-w-sm shadow-2xl"
-        initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}>
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"><Icon name="Lock" size={18} className="text-primary" /></div>
-          <div><h3 className="font-serif text-lg text-foreground">Режим администратора</h3><p className="text-muted-foreground text-xs">Введи пароль для управления треками</p></div>
-        </div>
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <input ref={ref} type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError(false) }} placeholder="Пароль"
-              className={`w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 transition-all ${error ? "ring-2 ring-destructive" : "focus:ring-primary"}`} />
-            {error && <motion.p className="text-destructive text-xs mt-2 ml-1" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}>Неверный пароль</motion.p>}
-          </div>
-          <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl bg-secondary text-foreground hover:bg-secondary/80 transition-colors text-sm">Отмена</button>
-            <button type="submit" disabled={loading || !password} className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm disabled:opacity-50" data-clickable>{loading ? "..." : "Войти"}</button>
-          </div>
-        </form>
-      </motion.div>
-    </motion.div>
-  )
-}
-
-// ─── Cover picker ─────────────────────────────────────────────────────────────
-function CoverPicker({ preview, onFile }: { preview: string; onFile: (file: File) => void }) {
-  const ref = useRef<HTMLInputElement>(null)
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground mb-1.5">Обложка</p>
-      <div className="flex items-center gap-3">
-        <div className={`w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 ${preview ? "" : "bg-secondary flex items-center justify-center"}`}>
-          {preview ? <img src={preview} alt="cover" className="w-full h-full object-cover" /> : <Icon name="Image" size={22} className="text-muted-foreground" />}
-        </div>
-        <button type="button" onClick={() => ref.current?.click()}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-sm text-foreground transition-colors" data-clickable>
-          <Icon name="Upload" size={14} className="text-primary" /> {preview ? "Заменить" : "Загрузить фото"}
-        </button>
-        <input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = "" }} />
-      </div>
-    </div>
-  )
-}
-
-// ─── Upload form ──────────────────────────────────────────────────────────────
-function UploadFormModal({ fileName, onConfirm, onClose }: {
-  fileName: string
-  onConfirm: (title: string, artist: string, lyrics: string, coverFile: File | null) => void
-  onClose: () => void
-}) {
-  const [title, setTitle] = useState(fileName.replace(/\.[^.]+$/, ""))
-  const [artist, setArtist] = useState("")
-  const [lyrics, setLyrics] = useState("")
-  const [coverFile, setCoverFile] = useState<File | null>(null)
-  const [coverPreview, setCoverPreview] = useState("")
-  const lyricsRef = useRef<HTMLInputElement>(null)
-
-  const handleLyricsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return
-    const r = new FileReader(); r.onload = (ev) => setLyrics(ev.target?.result as string || ""); r.readAsText(f); e.target.value = ""
-  }
-  const handleCover = (f: File) => {
-    setCoverFile(f)
-    const r = new FileReader(); r.onload = (ev) => setCoverPreview(ev.target?.result as string || ""); r.readAsDataURL(f)
-  }
-
-  return (
-    <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-4 pb-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <motion.div className="bg-background rounded-2xl p-6 w-full max-w-sm shadow-2xl max-h-[90vh] overflow-y-auto"
-        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}>
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center"><Icon name="Music" size={16} className="text-primary" /></div>
-          <div><h3 className="font-serif text-base text-foreground">Новый трек</h3><p className="text-muted-foreground text-xs truncate max-w-[200px]">{fileName}</p></div>
-        </div>
-        <div className="space-y-3">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Название трека"
-            className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-          <input value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="Исполнитель"
-            className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-          <CoverPicker preview={coverPreview} onFile={handleCover} />
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs text-muted-foreground">Текст песни</span>
-              <button type="button" onClick={() => lyricsRef.current?.click()} className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors" data-clickable>
-                <Icon name="FileText" size={12} /> Загрузить .txt
-              </button>
-              <input ref={lyricsRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleLyricsFile} />
-            </div>
-            <textarea value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="Вставь текст или загрузи .txt файл..." rows={4}
-              className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
-          </div>
-        </div>
-        <div className="flex gap-3 mt-4">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-secondary text-foreground hover:bg-secondary/80 transition-colors text-sm">Отмена</button>
-          <button onClick={() => onConfirm(title, artist, lyrics, coverFile)} disabled={!title.trim()}
-            className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm disabled:opacity-50" data-clickable>Загрузить</button>
-        </div>
-      </motion.div>
-    </motion.div>
-  )
-}
-
-// ─── Edit track modal ─────────────────────────────────────────────────────────
-function EditTrackModal({ cell, adminPassword, onSave, onClose }: {
-  cell: CellTrack; adminPassword: string
-  onSave: (title: string, artist: string, lyrics: string, coverUrl: string) => void
-  onClose: () => void
-}) {
-  const [title, setTitle] = useState(cell.title)
-  const [artist, setArtist] = useState(cell.artist)
-  const [lyrics, setLyrics] = useState(cell.lyrics)
-  const [coverFile, setCoverFile] = useState<File | null>(null)
-  const [coverPreview, setCoverPreview] = useState(cell.cover_url)
-  const [saving, setSaving] = useState(false)
-  const lyricsRef = useRef<HTMLInputElement>(null)
-
-  const handleLyricsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return
-    const r = new FileReader(); r.onload = (ev) => setLyrics(ev.target?.result as string || ""); r.readAsText(f); e.target.value = ""
-  }
-  const handleCover = (f: File) => {
-    setCoverFile(f)
-    const r = new FileReader(); r.onload = (ev) => setCoverPreview(ev.target?.result as string || ""); r.readAsDataURL(f)
-  }
-
-  const handleSave = async () => {
-    if (!title.trim() || !cell.id) return
-    setSaving(true)
-    try {
-      let coverB64 = ""; let coverName = ""
-      if (coverFile) {
-        coverB64 = await new Promise<string>((res) => {
-          const r = new FileReader(); r.onload = (ev) => res((ev.target?.result as string).split(",")[1]); r.readAsDataURL(coverFile)
-        })
-        coverName = coverFile.name
-      }
-      const resp = await fetch(TRACKS_URL, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "X-Admin-Password": adminPassword },
-        body: JSON.stringify({ id: cell.id, title, artist, lyrics, cover_data: coverB64, cover_name: coverName, cover_url: cell.cover_url }),
-      })
-      const d = await resp.json()
-      onSave(title, artist, lyrics, d.cover_url || coverPreview)
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-4 pb-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <motion.div className="bg-background rounded-2xl p-6 w-full max-w-sm shadow-2xl max-h-[90vh] overflow-y-auto"
-        initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}>
-        <div className="flex items-center gap-3 mb-5">
-          <span className="text-2xl">{cell.emoji}</span>
-          <h3 className="font-serif text-base text-foreground">Редактировать трек</h3>
-        </div>
-        <div className="space-y-3">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Название"
-            className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-          <input value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="Исполнитель"
-            className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm" />
-          <CoverPicker preview={coverPreview} onFile={handleCover} />
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs text-muted-foreground">Текст песни</span>
-              <button type="button" onClick={() => lyricsRef.current?.click()} className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors" data-clickable>
-                <Icon name="FileText" size={12} /> Загрузить .txt
-              </button>
-              <input ref={lyricsRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleLyricsFile} />
-            </div>
-            <textarea value={lyrics} onChange={(e) => setLyrics(e.target.value)} placeholder="Текст песни..." rows={5}
-              className="w-full bg-secondary border-0 rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none" />
-          </div>
-        </div>
-        <div className="flex gap-3 mt-4">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-secondary text-foreground hover:bg-secondary/80 transition-colors text-sm">Отмена</button>
-          <button onClick={handleSave} disabled={saving || !title.trim()}
-            className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm disabled:opacity-50" data-clickable>
-            {saving ? "Сохраняю..." : "Сохранить"}
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  )
-}
-
-// ─── Cell action modal ────────────────────────────────────────────────────────
-function CellActionModal({ cell, onEdit, onReplace, onDelete, onClose }: {
-  cell: CellTrack; onEdit: () => void; onReplace: () => void; onDelete: () => void; onClose: () => void
-}) {
-  return (
-    <motion.div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm px-4 pb-8"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <motion.div className="bg-background rounded-2xl p-6 w-full max-w-sm shadow-2xl"
-        initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}>
-        <div className="flex items-center gap-3 mb-6">
-          {cell.cover_url
-            ? <img src={cell.cover_url} alt={cell.title} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
-            : <span className="text-3xl">{cell.emoji}</span>}
-          <div className="min-w-0">
-            <p className="font-medium text-foreground truncate">{cell.title}</p>
-            {cell.artist && <p className="text-muted-foreground text-sm truncate">{cell.artist}</p>}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <button onClick={onEdit} className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground" data-clickable>
-            <Icon name="Pencil" size={16} className="text-primary" /><span className="text-sm">Редактировать</span>
-          </button>
-          <button onClick={onReplace} className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors text-foreground" data-clickable>
-            <Icon name="RefreshCw" size={16} className="text-primary" /><span className="text-sm">Заменить файл</span>
-          </button>
-          <button onClick={onDelete} className="w-full flex items-center gap-3 py-3 px-4 rounded-xl bg-destructive/10 hover:bg-destructive/20 transition-colors text-destructive" data-clickable>
-            <Icon name="Trash2" size={16} /><span className="text-sm">Удалить трек</span>
-          </button>
-        </div>
-        <button onClick={onClose} className="w-full mt-3 py-3 rounded-xl bg-secondary/50 text-muted-foreground hover:bg-secondary transition-colors text-sm">Отмена</button>
-      </motion.div>
-    </motion.div>
-  )
-}
-
-// ─── Now playing panel ────────────────────────────────────────────────────────
-function NowPlayingPanel({ cell, radioMode, onClose }: { cell: CellTrack; radioMode: "off" | "seq" | "shuffle"; onClose: () => void }) {
-  const lyricsRef = useRef<HTMLDivElement>(null)
-  return (
-    <motion.div className="max-w-6xl mx-auto px-6 mt-8"
-      initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}>
-      <div className={`bg-gradient-to-br ${cell.color} rounded-2xl overflow-hidden`}>
-        {/* Top bar */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-white/10">
-          <div className="flex items-end gap-[3px]">
-            {[1,2,3,4].map(b => (
-              <motion.div key={b} className="w-1 bg-white/80 rounded-full"
-                animate={{ height: ["4px","16px","4px"] }}
-                transition={{ duration: 0.6, repeat: Infinity, delay: b*0.12, ease: "easeInOut" }} />
-            ))}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-white font-medium truncate text-sm">{cell.title}</p>
-            {cell.artist && <p className="text-white/60 text-xs truncate">{cell.artist}</p>}
-          </div>
-          {radioMode !== "off" && (
-            <div className="flex items-center gap-1 bg-white/20 rounded-lg px-2 py-1">
-              <Icon name={radioMode === "shuffle" ? "Shuffle" : "ListMusic"} size={12} className="text-white" />
-              <span className="text-white text-xs">{radioMode === "shuffle" ? "Произвольно" : "По порядку"}</span>
-            </div>
-          )}
-          <button onClick={onClose} className="text-white/60 hover:text-white transition-colors ml-1" data-clickable>
-            <Icon name="X" size={18} />
-          </button>
-        </div>
-
-        {/* Body: cover + lyrics */}
-        <div className="flex gap-0 min-h-[220px] max-h-[340px]">
-          {/* Cover */}
-          <div className="w-[180px] flex-shrink-0 hidden sm:block">
-            {cell.cover_url
-              ? <img src={cell.cover_url} alt={cell.title} className="w-full h-full object-cover" />
-              : <div className="w-full h-full flex items-center justify-center opacity-30">
-                  <span className="text-7xl">{cell.emoji}</span>
-                </div>}
-          </div>
-          {/* Lyrics */}
-          <div ref={lyricsRef} className="flex-1 p-5 overflow-y-auto">
-            {cell.lyrics ? (
-              <p className="text-white/90 text-sm leading-relaxed whitespace-pre-wrap">{cell.lyrics}</p>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center gap-2 opacity-30">
-                <Icon name="FileText" size={32} className="text-white" />
-                <p className="text-white text-sm">Текст не добавлен</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  )
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
 export function CarouselSection() {
   const [cells, setCells] = useState<CellTrack[]>(() =>
     Array.from({ length: TOTAL }, (_, i) => makeEmpty(Math.floor(i / COLS), i % COLS))
@@ -420,7 +25,6 @@ export function CarouselSection() {
   const [showUploadForm, setShowUploadForm] = useState(false)
   const [showSwipeHint, setShowSwipeHint] = useState(() => !localStorage.getItem("swipeHintSeen"))
   const [spinningRow, setSpinningRow] = useState<number | null>(null)
-  // Radio: "off" | "seq" | "shuffle"
   const [radioMode, setRadioMode] = useState<"off" | "seq" | "shuffle">("off")
   const radioClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const radioClickCount = useRef(0)
@@ -461,7 +65,6 @@ export function CarouselSection() {
     audio.play().catch(() => {})
     audio.onended = () => {
       if (radioMode === "seq") {
-        // next non-empty track
         const nonEmpty = cells.map((c, i) => ({ c, i })).filter(x => !x.c.isEmpty && x.c.file_url)
         const cur = nonEmpty.findIndex(x => x.i === flatIdx)
         const next = nonEmpty[(cur + 1) % nonEmpty.length]
@@ -473,15 +76,14 @@ export function CarouselSection() {
         const pick = nonEmpty[Math.floor(Math.random() * nonEmpty.length)]
         setPlayingIdx(pick.i); playTrack(pick.i)
       } else {
-        // no auto — stay, let user swipe
-        setPlayingIdx(flatIdx) // keep highlight
+        setPlayingIdx(flatIdx)
       }
     }
     setPlayingIdx(flatIdx)
    
   }, [cells, radioMode])
 
-  // ── Radio button: single click = seq, double = shuffle ─────────────────────
+  // ── Radio: single click = seq, double = shuffle ─────────────────────────────
   const handleRadioClick = () => {
     radioClickCount.current += 1
     if (radioClickTimer.current) clearTimeout(radioClickTimer.current)
@@ -489,34 +91,21 @@ export function CarouselSection() {
       const clicks = radioClickCount.current
       radioClickCount.current = 0
       if (clicks >= 2) {
-        // double → shuffle or off if already shuffle
         setRadioMode(prev => prev === "shuffle" ? "off" : "shuffle")
       } else {
-        // single → seq or off if already seq
-        setRadioMode(prev => {
-          if (prev === "off" || prev === "shuffle") {
-            // start playing first track if nothing playing
-            return "seq"
-          }
-          return "off"
-        })
+        setRadioMode(prev => (prev === "off" || prev === "shuffle") ? "seq" : "off")
       }
     }, 280)
   }
 
-  // Auto-start first track when radio turns on
   useEffect(() => {
     if (radioMode !== "off" && playingIdx === null) {
       const nonEmpty = cells.map((c, i) => ({ c, i })).filter(x => !x.c.isEmpty && x.c.file_url)
       if (!nonEmpty.length) return
-      const pick = radioMode === "shuffle"
-        ? nonEmpty[Math.floor(Math.random() * nonEmpty.length)]
-        : nonEmpty[0]
+      const pick = radioMode === "shuffle" ? nonEmpty[Math.floor(Math.random() * nonEmpty.length)] : nonEmpty[0]
       playTrack(pick.i)
     }
-    if (radioMode === "off") {
-      audioRef.current?.pause(); setPlayingIdx(null)
-    }
+    if (radioMode === "off") { audioRef.current?.pause(); setPlayingIdx(null) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [radioMode])
 
@@ -559,16 +148,13 @@ export function CarouselSection() {
     } finally { setUploadingIdx(null) }
   }
 
-  // ── Cell click ──────────────────────────────────────────────────────────────
+  // ── Cell interactions ───────────────────────────────────────────────────────
   const handleCellClick = (flatIdx: number) => {
     const cell = cells[flatIdx]
     if (cell.isEmpty) { if (isAdmin) triggerFileSelect(flatIdx); return }
     if (!cell.file_url) return
-    if (playingIdx === flatIdx) {
-      audioRef.current?.pause(); setPlayingIdx(null)
-    } else {
-      playTrack(flatIdx)
-    }
+    if (playingIdx === flatIdx) { audioRef.current?.pause(); setPlayingIdx(null) }
+    else playTrack(flatIdx)
   }
 
   const handleLongPress = (flatIdx: number) => {
@@ -599,11 +185,6 @@ export function CarouselSection() {
     setRowOffsets(prev => { const next = [...prev]; next[rowIdx] = ((next[rowIdx] + dir + TOTAL) % TOTAL); return next })
   const shiftCol = (colIdx: number, dir: 1 | -1) =>
     setColOffsets(prev => { const next = [...prev]; next[colIdx] = ((next[colIdx] + dir + TOTAL) % TOTAL); return next })
-
-  const getCell = (row: number, col: number) => {
-    const flatIdx = ((row * COLS + col + rowOffsets[row] + colOffsets[col]) % TOTAL + TOTAL) % TOTAL
-    return { cell: cells[flatIdx], flatIdx }
-  }
 
   // ── Swipe ───────────────────────────────────────────────────────────────────
   const rowSwipeStart = useRef<{ x: number; y: number; t: number } | null>(null)
@@ -690,7 +271,6 @@ export function CarouselSection() {
             </motion.p>
           </div>
           <div className="flex items-center gap-2 mt-1">
-            {/* Radio button */}
             <motion.button
               className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-colors ${
                 radioMode === "shuffle" ? "bg-yellow-400/30 text-yellow-300" :
@@ -701,7 +281,6 @@ export function CarouselSection() {
               <Icon name={radioMode === "shuffle" ? "Shuffle" : "Radio"} size={14} />
               <span>{radioMode === "shuffle" ? "Произвол." : radioMode === "seq" ? "Радио" : "Радио"}</span>
             </motion.button>
-            {/* Admin button */}
             <motion.button
               className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-colors ${isAdmin ? "bg-white/20 text-white" : "bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/70"}`}
               onClick={() => isAdmin ? setIsAdmin(false) : setShowPasswordModal(true)}
@@ -714,105 +293,25 @@ export function CarouselSection() {
       </div>
 
       {/* Grid */}
-      <div className="flex justify-center px-6">
-        <div className="relative">
-          {/* Col up buttons */}
-          <div className="flex gap-3 mb-3 justify-center">
-            {Array.from({ length: COLS }).map((_, ci) => (
-              <button key={ci} style={{ width: "clamp(90px, 18vw, 140px)" }}
-                className="flex justify-center items-center py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 hover:text-white"
-                onClick={() => shiftCol(ci, -1)} onTouchStart={handleColSwipeStart} onTouchEnd={(e) => handleColSwipeEnd(ci, e)} data-clickable>
-                <Icon name="ChevronUp" size={14} />
-              </button>
-            ))}
-          </div>
-
-          <div className="flex gap-3 items-center">
-            {/* Row left buttons */}
-            <div className="flex flex-col gap-3">
-              {Array.from({ length: ROWS }).map((_, ri) => (
-                <button key={ri} style={{ height: "clamp(90px, 18vw, 140px)" }}
-                  className="flex items-center justify-center w-7 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 hover:text-white"
-                  onClick={() => shiftRow(ri, -1)} data-clickable>
-                  <Icon name="ChevronLeft" size={14} />
-                </button>
-              ))}
-            </div>
-
-            {/* Cells */}
-            <div className="flex flex-col gap-3 relative">
-              <AnimatePresence>
-                {showSwipeHint && (
-                  <motion.div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none rounded-2xl overflow-hidden"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-5 py-3 flex flex-col items-center gap-2">
-                      <div className="flex items-center gap-2 text-white text-sm font-medium">
-                        <motion.div animate={{ x: [-6, 6, -6] }} transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}>
-                          <Icon name="ArrowLeftRight" size={18} className="text-white" />
-                        </motion.div>
-                        <span>Свайп — листать</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-white/70 text-xs">
-                        <Icon name="Zap" size={13} className="text-yellow-400" />
-                        <span>Резкий свайп — случайный трек</span>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {Array.from({ length: ROWS }).map((_, row) => (
-                <div key={row} className="flex gap-3 relative"
-                  onTouchStart={handleRowSwipeStart} onTouchEnd={(e) => handleRowSwipeEnd(row, e)}
-                  style={{ touchAction: "pan-y" }}>
-                  <AnimatePresence>
-                    {spinningRow === row && (
-                      <motion.div className="absolute inset-0 z-10 rounded-2xl bg-white/10 backdrop-blur-[2px] flex items-center justify-center pointer-events-none"
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <motion.div animate={{ rotate: 360 }} transition={{ duration: 0.5, repeat: Infinity, ease: "linear" }}>
-                          <Icon name="Shuffle" size={22} className="text-white/80" />
-                        </motion.div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                  {Array.from({ length: COLS }).map((_, col) => {
-                    const { cell, flatIdx } = getCell(row, col)
-                    return (
-                      <div key={col} style={{ width: "clamp(90px, 18vw, 140px)", height: "clamp(90px, 18vw, 140px)" }}>
-                        <TrackCard cell={cell} isPlaying={playingIdx === flatIdx} uploading={uploadingIdx === flatIdx}
-                          isAdmin={isAdmin} isHighlighted={highlightIdx === flatIdx}
-                          onClick={() => handleCellClick(flatIdx)} onLongPress={() => handleLongPress(flatIdx)} />
-                      </div>
-                    )
-                  })}
-                </div>
-              ))}
-            </div>
-
-            {/* Row right buttons */}
-            <div className="flex flex-col gap-3">
-              {Array.from({ length: ROWS }).map((_, ri) => (
-                <button key={ri} style={{ height: "clamp(90px, 18vw, 140px)" }}
-                  className="flex items-center justify-center w-7 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 hover:text-white"
-                  onClick={() => shiftRow(ri, 1)} data-clickable>
-                  <Icon name="ChevronRight" size={14} />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Col down buttons */}
-          <div className="flex gap-3 mt-3 justify-center">
-            {Array.from({ length: COLS }).map((_, ci) => (
-              <button key={ci} style={{ width: "clamp(90px, 18vw, 140px)" }}
-                className="flex justify-center items-center py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 hover:text-white"
-                onClick={() => shiftCol(ci, 1)} onTouchStart={handleColSwipeStart} onTouchEnd={(e) => handleColSwipeEnd(ci, e)} data-clickable>
-                <Icon name="ChevronDown" size={14} />
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <CarouselGrid
+        cells={cells}
+        playingIdx={playingIdx}
+        uploadingIdx={uploadingIdx}
+        highlightIdx={highlightIdx}
+        spinningRow={spinningRow}
+        showSwipeHint={showSwipeHint}
+        isAdmin={isAdmin}
+        rowOffsets={rowOffsets}
+        colOffsets={colOffsets}
+        onCellClick={handleCellClick}
+        onLongPress={handleLongPress}
+        onShiftRow={shiftRow}
+        onShiftCol={shiftCol}
+        onRowSwipeStart={handleRowSwipeStart}
+        onRowSwipeEnd={handleRowSwipeEnd}
+        onColSwipeStart={handleColSwipeStart}
+        onColSwipeEnd={handleColSwipeEnd}
+      />
 
       {/* Now playing panel */}
       <AnimatePresence>
