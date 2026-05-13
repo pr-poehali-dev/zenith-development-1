@@ -526,6 +526,31 @@ export function CarouselSection() {
   const shiftCol = (colIdx: number, dir: 1 | -1) =>
     setColOffsets((prev) => { const next = [...prev]; next[colIdx] = ((next[colIdx] + dir + TOTAL) % TOTAL); return next })
 
+  const rowSwipeStart = useRef<{ x: number; y: number } | null>(null)
+  const colSwipeStart = useRef<{ x: number; y: number } | null>(null)
+
+  const handleRowSwipeStart = (e: React.TouchEvent) => {
+    rowSwipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+  }
+  const handleRowSwipeEnd = (rowIdx: number, e: React.TouchEvent) => {
+    if (!rowSwipeStart.current) return
+    const dx = e.changedTouches[0].clientX - rowSwipeStart.current.x
+    const dy = Math.abs(e.changedTouches[0].clientY - rowSwipeStart.current.y)
+    if (Math.abs(dx) > 40 && Math.abs(dx) > dy) shiftRow(rowIdx, dx < 0 ? 1 : -1)
+    rowSwipeStart.current = null
+  }
+
+  const handleColSwipeStart = (e: React.TouchEvent) => {
+    colSwipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+  }
+  const handleColSwipeEnd = (colIdx: number, e: React.TouchEvent) => {
+    if (!colSwipeStart.current) return
+    const dy = e.changedTouches[0].clientY - colSwipeStart.current.y
+    const dx = Math.abs(e.changedTouches[0].clientX - colSwipeStart.current.x)
+    if (Math.abs(dy) > 40 && Math.abs(dy) > dx) shiftCol(colIdx, dy < 0 ? -1 : 1)
+    colSwipeStart.current = null
+  }
+
   const getCell = (row: number, col: number) => {
     const flatIdx = ((row * COLS + col + rowOffsets[row] + colOffsets[col]) % TOTAL + TOTAL) % TOTAL
     return { cell: cells[flatIdx], flatIdx }
@@ -587,7 +612,10 @@ export function CarouselSection() {
             {Array.from({ length: COLS }).map((_, colIdx) => (
               <button key={colIdx} style={{ width: "clamp(90px, 18vw, 140px)" }}
                 className="flex justify-center items-center py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 hover:text-white"
-                onClick={() => shiftCol(colIdx, -1)} data-clickable>
+                onClick={() => shiftCol(colIdx, -1)}
+                onTouchStart={handleColSwipeStart}
+                onTouchEnd={(e) => handleColSwipeEnd(colIdx, e)}
+                data-clickable>
                 <Icon name="ChevronUp" size={14} />
               </button>
             ))}
@@ -604,21 +632,25 @@ export function CarouselSection() {
               ))}
             </div>
 
-            <div className="grid gap-3" style={{
-              gridTemplateColumns: `repeat(${COLS}, clamp(90px, 18vw, 140px))`,
-              gridTemplateRows: `repeat(${ROWS}, clamp(90px, 18vw, 140px))`,
-            }}>
-              {Array.from({ length: ROWS }).map((_, row) =>
-                Array.from({ length: COLS }).map((_, col) => {
-                  const { cell, flatIdx } = getCell(row, col)
-                  return (
-                    <TrackCard key={`${row}-${col}`} cell={cell}
-                      isPlaying={playingIdx === flatIdx} uploading={uploadingIdx === flatIdx}
-                      isAdmin={isAdmin} onClick={() => handleCellClick(flatIdx)}
-                      onLongPress={() => handleLongPress(flatIdx)} />
-                  )
-                })
-              )}
+            <div className="flex flex-col gap-3">
+              {Array.from({ length: ROWS }).map((_, row) => (
+                <div key={row} className="flex gap-3"
+                  onTouchStart={handleRowSwipeStart}
+                  onTouchEnd={(e) => handleRowSwipeEnd(row, e)}
+                  style={{ touchAction: "pan-y" }}>
+                  {Array.from({ length: COLS }).map((_, col) => {
+                    const { cell, flatIdx } = getCell(row, col)
+                    return (
+                      <div key={col} style={{ width: "clamp(90px, 18vw, 140px)", height: "clamp(90px, 18vw, 140px)" }}>
+                        <TrackCard cell={cell}
+                          isPlaying={playingIdx === flatIdx} uploading={uploadingIdx === flatIdx}
+                          isAdmin={isAdmin} onClick={() => handleCellClick(flatIdx)}
+                          onLongPress={() => handleLongPress(flatIdx)} />
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
             </div>
 
             <div className="flex flex-col gap-3">
@@ -636,7 +668,10 @@ export function CarouselSection() {
             {Array.from({ length: COLS }).map((_, colIdx) => (
               <button key={colIdx} style={{ width: "clamp(90px, 18vw, 140px)" }}
                 className="flex justify-center items-center py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 hover:text-white"
-                onClick={() => shiftCol(colIdx, 1)} data-clickable>
+                onClick={() => shiftCol(colIdx, 1)}
+                onTouchStart={handleColSwipeStart}
+                onTouchEnd={(e) => handleColSwipeEnd(colIdx, e)}
+                data-clickable>
                 <Icon name="ChevronDown" size={14} />
               </button>
             ))}
