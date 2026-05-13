@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "GET site settings",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"hero_gif_url": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
